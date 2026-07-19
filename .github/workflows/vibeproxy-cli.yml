@@ -91,7 +91,7 @@ jobs:
 
       - name: Smoke-test packed CLI
         run: |
-          package_file=$(find release -maxdepth 1 -type f -name '*.tgz' -print -quit)
+          package_file=$(realpath "$(find release -maxdepth 1 -type f -name '*.tgz' -print -quit)")
           smoke_prefix=$(mktemp -d)
           npm install --global --prefix "$smoke_prefix" "$package_file"
           PATH="$smoke_prefix/bin:$PATH" happy --help >/dev/null
