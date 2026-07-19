@@ -85,8 +85,8 @@ jobs:
       - name: Verify fork identity and license
         run: |
           package_file=$(find release -maxdepth 1 -type f -name '*.tgz' -print -quit)
-          tar -tzf "$package_file" | grep -qx 'package/LICENSE'
-          tar -tzf "$package_file" | grep -qx 'package/FORK_NOTICE.md'
+          tar -tzf "$package_file" | grep -x 'package/LICENSE' >/dev/null
+          tar -tzf "$package_file" | grep -x 'package/FORK_NOTICE.md' >/dev/null
           tar -xOf "$package_file" package/package.json | node -e "let value=''; process.stdin.on('data', chunk => value += chunk); process.stdin.on('end', () => { const p=JSON.parse(value); process.exit(p.happyVibeProxyFork === true ? 0 : 1); });"
 
       - name: Smoke-test packed CLI

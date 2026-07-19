@@ -86,8 +86,8 @@ fi
 )
 
 package_file="$package_dir/$asset_name"
-tar -tzf "$package_file" | grep -qx 'package/LICENSE'
-tar -tzf "$package_file" | grep -qx 'package/FORK_NOTICE.md'
+tar -tzf "$package_file" | grep -x 'package/LICENSE' >/dev/null
+tar -tzf "$package_file" | grep -x 'package/FORK_NOTICE.md' >/dev/null
 tar -xOf "$package_file" package/package.json | node -e "let value=''; process.stdin.on('data', chunk => value += chunk); process.stdin.on('end', () => { const p=JSON.parse(value); process.exit(p.happyVibeProxyFork === true ? 0 : 1); });"
 
 happy_bin="$npm_prefix/bin/happy"
