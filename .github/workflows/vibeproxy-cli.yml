@@ -1,0 +1,62 @@
+name: VibeProxy Happy CLI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/happy-cli/**'
+      - 'packages/happy-wire/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/vibeproxy-cli.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/happy-cli/**'
+      - 'packages/happy-wire/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/vibeproxy-cli.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Test dynamic model discovery
+        run: pnpm --filter happy exec vitest run --project unit src/claude/utils/vibeProxyModelCatalog.test.ts
+
+      - name: Build CLI
+        run: pnpm --filter happy build
+
+      - name: Pack installable CLI
+        run: pnpm --filter happy pack --pack-destination packages/happy-cli
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: happy-vibeproxy-cli
+          path: packages/happy-cli/*.tgz
+          if-no-files-found: error
+
+      - name: Update rolling release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view vibeproxy-latest >/dev/null 2>&1; then
+            gh release create vibeproxy-latest --prerelease --title 'Happy VibeProxy rolling build' --notes 'Automatically built from the latest tested main branch.'
+          fi
+          gh release upload vibeproxy-latest packages/happy-cli/*.tgz --clobber

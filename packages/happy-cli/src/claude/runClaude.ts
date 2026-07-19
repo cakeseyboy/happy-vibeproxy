@@ -39,6 +39,7 @@ import { getProjectPath } from './utils/path';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RawJSONLinesSchema, type RawJSONLines } from './types';
+import { discoverVibeProxyModels } from './utils/vibeProxyModelCatalog';
 
 /** JavaScript runtime to use for spawning Claude Code */
 export type JsRuntime = 'node' | 'bun'
@@ -122,6 +123,17 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
     // Lineage from the daemon's spawn RPC (set by app-side fork / duplicate).
     const forkedFromSessionId = process.env.HAPPY_FORKED_FROM_SESSION_ID;
     const forkedFromMessageId = process.env.HAPPY_FORKED_FROM_MESSAGE_ID;
+    const initialModel = options.model ?? DEFAULT_CLAUDE_MODEL;
+    const vibeProxyCatalog = await discoverVibeProxyModels();
+    const pickerModels = vibeProxyCatalog?.models ?? [];
+    if (vibeProxyCatalog) {
+        logger.debugLargeJson('[VIBEPROXY] Publishing dynamic model catalog', {
+            binary: vibeProxyCatalog.binary,
+            providers: vibeProxyCatalog.providers,
+            models: pickerModels,
+            currentModelCode: initialModel,
+        });
+    }
 
     let metadata: Metadata = {
         path: workingDirectory,
@@ -142,6 +154,10 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
         flavor: 'claude',
         sandbox: sandboxConfig?.enabled ? sandboxConfig : null,
         dangerouslySkipPermissions,
+        ...(pickerModels.length > 0 ? {
+            models: pickerModels,
+            currentModelCode: initialModel,
+        } : {}),
         ...(forkedFromSessionId ? { parentSessionId: forkedFromSessionId } : {}),
         ...(forkedFromMessageId ? { forkedFromMessageId } : {}),
     };
@@ -521,7 +537,7 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
     // Forward messages to the queue
     // Permission modes: Use the unified 7-mode type, mapping happens at SDK boundary in claudeRemote.ts
     let currentPermissionMode: PermissionMode | undefined = initialPermissionMode;
-    let currentModel: string | undefined = options.model ?? DEFAULT_CLAUDE_MODEL; // Track current model state
+    let currentModel: string | undefined = initialModel; // Track current model state
     let currentFallbackModel: string | undefined = undefined; // Track current fallback model
     let currentCustomSystemPrompt: string | undefined = undefined; // Track current custom system prompt
     let currentAppendSystemPrompt: string | undefined = undefined; // Track current append system prompt
@@ -531,7 +547,7 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
 
     const resetCurrentModeDefaults = () => {
         currentPermissionMode = initialPermissionMode;
-        currentModel = options.model ?? DEFAULT_CLAUDE_MODEL;
+        currentModel = initialModel;
         currentFallbackModel = undefined;
         currentCustomSystemPrompt = undefined;
         currentAppendSystemPrompt = undefined;
@@ -674,9 +690,13 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
         // Resolve model - use message.meta.model if provided, otherwise use current model
         let messageModel = currentModel;
         if (message.meta?.hasOwnProperty('model')) {
-            messageModel = message.meta.model || undefined; // null becomes undefined
+            messageModel = message.meta.model || initialModel;
             currentModel = messageModel;
-            logger.debug(`[loop] Model updated from user message: ${messageModel || 'reset to default'}`);
+            session.updateMetadata((currentMetadata) => ({
+                ...currentMetadata,
+                currentModelCode: currentModel,
+            }));
+            logger.debug(`[loop] Model updated from user message: ${messageModel}`);
         } else {
             logger.debug(`[loop] User message received with no model override, using current: ${currentModel || 'default'}`);
         }
