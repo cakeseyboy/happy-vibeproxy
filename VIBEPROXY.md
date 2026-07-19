@@ -32,3 +32,16 @@ The daily `Sync Happy upstream` workflow merges `slopus/happy:main`, validates
 the model-discovery tests and CLI build, then pushes the tested merge. Merge
 conflicts stop the workflow for manual resolution instead of overwriting fork
 changes.
+
+## Local update
+
+From this checkout, run:
+
+```bash
+./scripts/update-local-vibeproxy.sh
+```
+
+The helper fetches Happy upstream, merges it into the current local fork
+branch, runs the Happy CLI tests, packs the CLI, installs it into the local npm
+prefix, and restarts the Happy daemon only after the tests pass. It does not
+push commits or publish releases.
