@@ -5,7 +5,15 @@
 
 set -euo pipefail
 
-repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  echo "Usage: update-happy-vibeproxy"
+  echo "Fetch upstream Happy, test, install, and restart the local daemon."
+  echo "No commits are pushed and no releases are published."
+  exit 0
+fi
+
+script_path="$(realpath -- "${BASH_SOURCE[0]}")"
+repo_dir="$(cd -- "$(dirname -- "$script_path")/.." && pwd)"
 cd "$repo_dir"
 
 if [[ -n "${HAPPY_VIBEPROXY_BRANCH:-}" ]]; then
