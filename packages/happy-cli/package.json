@@ -1,16 +1,17 @@
 {
   "name": "happy",
   "version": "1.2.0",
-  "description": "Mobile and Web client for Claude Code and Codex",
+  "description": "Unofficial Happy CLI fork with dynamic VibeProxy model discovery",
   "author": "Kirill Dubovitskiy",
   "license": "MIT",
   "type": "module",
-  "homepage": "https://happy.engineering",
-  "bugs": "https://github.com/slopus/happy/issues",
+  "homepage": "https://github.com/cakeseyboy/happy-vibeproxy",
+  "bugs": "https://github.com/cakeseyboy/happy-vibeproxy/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/slopus/happy"
+    "url": "https://github.com/cakeseyboy/happy-vibeproxy"
   },
+  "happyVibeProxyFork": true,
   "bin": {
     "happy": "./bin/happy.mjs",
     "happy-mcp": "./bin/happy-mcp.mjs"
@@ -54,6 +55,7 @@
     "dist",
     "bin",
     "scripts",
+    "FORK_NOTICE.md",
     "tools/archives",
     "tools/licenses",
     "package.json"

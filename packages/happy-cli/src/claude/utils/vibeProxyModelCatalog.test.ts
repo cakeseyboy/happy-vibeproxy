@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseVibeProxyModelOutput } from './vibeProxyModelCatalog';
+import { parseVibeProxyModelOutput, selectVibeProxyProviders } from './vibeProxyModelCatalog';
 
 describe('parseVibeProxyModelOutput', () => {
     it('parses every provider and preserves exact model IDs', () => {
@@ -36,5 +36,19 @@ describe('parseVibeProxyModelOutput', () => {
         ].join('\n'));
 
         expect(catalog.get('codex')).toEqual(['gpt-5.5', 'gpt-5.6-luna']);
+    });
+});
+
+describe('selectVibeProxyProviders', () => {
+    const providers = ['codex', 'kimi', 'grok'];
+
+    it('publishes only authenticated providers by default', () => {
+        expect(selectVibeProxyProviders(providers, ['codex'])).toEqual(['codex']);
+        expect(selectVibeProxyProviders(providers, [])).toEqual([]);
+    });
+
+    it('supports explicit provider overrides', () => {
+        expect(selectVibeProxyProviders(providers, [], 'all')).toEqual(providers);
+        expect(selectVibeProxyProviders(providers, [], 'grok, codex')).toEqual(['codex', 'grok']);
     });
 });

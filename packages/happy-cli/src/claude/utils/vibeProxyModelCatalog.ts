@@ -82,12 +82,25 @@ async function runProxyCommand(binary: string, args: string[], timeout = COMMAND
     return result.stdout;
 }
 
-async function authenticatedProviders(binary: string, providers: string[]): Promise<string[]> {
-    const configured = process.env.HAPPY_VIBEPROXY_PROVIDERS?.trim().toLowerCase();
+export function selectVibeProxyProviders(
+    providers: string[],
+    authenticated: string[],
+    configuredProviders?: string,
+): string[] {
+    const configured = configuredProviders?.trim().toLowerCase();
     if (configured === 'all') return providers;
     if (configured) {
         const requested = new Set(configured.split(',').map((provider) => provider.trim()).filter(Boolean));
         return providers.filter((provider) => requested.has(provider));
+    }
+
+    return authenticated;
+}
+
+async function authenticatedProviders(binary: string, providers: string[]): Promise<string[]> {
+    const configured = process.env.HAPPY_VIBEPROXY_PROVIDERS;
+    if (configured) {
+        return selectVibeProxyProviders(providers, [], configured);
     }
 
     const checks = await Promise.all(providers.map(async (provider) => {
@@ -100,9 +113,10 @@ async function authenticatedProviders(binary: string, providers: string[]): Prom
     }));
     const authenticated = checks.filter((provider): provider is string => provider !== null);
 
-    // Third-party VibeProxy-compatible binaries may expose a model catalog but
-    // not provider auth subcommands. In that case, preserve the useful catalog.
-    return authenticated.length > 0 ? authenticated : providers;
+    // Do not advertise models that will fail when no provider is authenticated.
+    // Compatible binaries without auth subcommands can opt in explicitly with
+    // HAPPY_VIBEPROXY_PROVIDERS=all or a comma-separated provider list.
+    return selectVibeProxyProviders(providers, authenticated);
 }
 
 export async function discoverVibeProxyModels(): Promise<VibeProxyModelCatalog | null> {

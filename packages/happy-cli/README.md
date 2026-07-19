@@ -1,5 +1,10 @@
 # Happy
 
+> [!NOTE]
+> This package was built by the unofficial
+> [Happy + VibeProxy fork](https://github.com/cakeseyboy/happy-vibeproxy).
+> `npm install -g happy` installs the upstream package, not this fork.
+
 Code on the go — control AI coding agents from your phone, browser, or terminal.
 
 Free. Open source. Code anywhere.

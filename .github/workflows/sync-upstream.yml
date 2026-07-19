@@ -6,35 +6,92 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: sync-happy-upstream
+  cancel-in-progress: false
 
 jobs:
-  sync:
+  test:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+      base_sha: ${{ steps.merge.outputs.base_sha }}
+      upstream_sha: ${{ steps.merge.outputs.upstream_sha }}
+      tested_tree: ${{ steps.merge.outputs.tested_tree }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Merge upstream
+        id: merge
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git remote add upstream https://github.com/slopus/happy.git
           git fetch upstream main
-          git merge --no-edit upstream/main
+          before=$(git rev-parse HEAD)
+          upstream_sha=$(git rev-parse upstream/main)
+          git merge --no-edit "$upstream_sha"
+          after=$(git rev-parse HEAD)
+          echo "base_sha=$before" >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=$upstream_sha" >> "$GITHUB_OUTPUT"
+          echo "tested_tree=$(git rev-parse HEAD^{tree})" >> "$GITHUB_OUTPUT"
+          if [ "$before" = "$after" ]; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: pnpm/action-setup@v4
+        if: steps.merge.outputs.changed == 'true'
 
       - uses: actions/setup-node@v4
+        if: steps.merge.outputs.changed == 'true'
         with:
           node-version: 20
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter happy exec vitest run --project unit src/claude/utils/vibeProxyModelCatalog.test.ts
-      - run: pnpm --filter happy build
+        if: steps.merge.outputs.changed == 'true'
+
+      - name: Run complete Happy CLI unit suite
+        if: steps.merge.outputs.changed == 'true'
+        run: pnpm --filter happy test
+
+  push:
+    needs: test
+    if: needs.test.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.test.outputs.base_sha }}
 
       - name: Push tested merge
-        run: git push origin HEAD:main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ needs.test.outputs.base_sha }}
+          UPSTREAM_SHA: ${{ needs.test.outputs.upstream_sha }}
+          TESTED_TREE: ${{ needs.test.outputs.tested_tree }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add upstream https://github.com/slopus/happy.git
+          git fetch upstream main
+          git cat-file -e "$UPSTREAM_SHA^{commit}"
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          git merge --no-edit "$UPSTREAM_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$TESTED_TREE"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:main
+          gh workflow run vibeproxy-cli.yml --repo "$GITHUB_REPOSITORY" --ref main

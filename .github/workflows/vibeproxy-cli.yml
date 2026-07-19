@@ -6,6 +6,7 @@ on:
     paths:
       - 'packages/happy-cli/**'
       - 'packages/happy-wire/**'
+      - 'scripts/update-local-vibeproxy.sh'
       - 'pnpm-lock.yaml'
       - '.github/workflows/vibeproxy-cli.yml'
   pull_request:
@@ -13,50 +14,132 @@ on:
     paths:
       - 'packages/happy-cli/**'
       - 'packages/happy-wire/**'
+      - 'scripts/update-local-vibeproxy.sh'
       - 'pnpm-lock.yaml'
       - '.github/workflows/vibeproxy-cli.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: vibeproxy-cli-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 24]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node-version }}
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Test dynamic model discovery
-        run: pnpm --filter happy exec vitest run --project unit src/claude/utils/vibeProxyModelCatalog.test.ts
+      - name: Run complete Happy CLI unit suite
+        run: pnpm --filter happy test
 
-      - name: Build CLI
-        run: pnpm --filter happy build
+      - name: Validate local updater syntax
+        run: bash -n scripts/update-local-vibeproxy.sh
+
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter happy build
 
       - name: Pack installable CLI
-        run: pnpm --filter happy pack --pack-destination packages/happy-cli
+        run: |
+          mkdir -p release
+          pnpm --filter happy pack --pack-destination release
+          package_file=$(find release -maxdepth 1 -type f -name '*.tgz' -print -quit)
+          package_name=$(basename "$package_file")
+          (cd release && sha256sum "$package_name" > "$package_name.sha256")
+          printf '%s\n' "$GITHUB_SHA" > release/commit.txt
+
+      - name: Verify fork identity and license
+        run: |
+          package_file=$(find release -maxdepth 1 -type f -name '*.tgz' -print -quit)
+          tar -tzf "$package_file" | grep -qx 'package/LICENSE'
+          tar -tzf "$package_file" | grep -qx 'package/FORK_NOTICE.md'
+          tar -xOf "$package_file" package/package.json | node -e "let value=''; process.stdin.on('data', chunk => value += chunk); process.stdin.on('end', () => { const p=JSON.parse(value); process.exit(p.happyVibeProxyFork === true ? 0 : 1); });"
+
+      - name: Smoke-test packed CLI
+        run: |
+          package_file=$(find release -maxdepth 1 -type f -name '*.tgz' -print -quit)
+          smoke_prefix=$(mktemp -d)
+          npm install --global --prefix "$smoke_prefix" "$package_file"
+          PATH="$smoke_prefix/bin:$PATH" happy --help >/dev/null
+          PATH="$smoke_prefix/bin:$PATH" happy --version >/dev/null
+          PATH="$smoke_prefix/bin:$PATH" happy doctor >/dev/null
+          PATH="$smoke_prefix/bin:$PATH" happy daemon status >/dev/null
 
       - uses: actions/upload-artifact@v4
         with:
           name: happy-vibeproxy-cli
-          path: packages/happy-cli/*.tgz
+          path: release/*
           if-no-files-found: error
 
-      - name: Update rolling release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  release:
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: happy-vibeproxy-cli
+          path: release
+
+      - name: Publish rolling release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           if ! gh release view vibeproxy-latest >/dev/null 2>&1; then
-            gh release create vibeproxy-latest --prerelease --title 'Happy VibeProxy rolling build' --notes 'Automatically built from the latest tested main branch.'
+            gh release create vibeproxy-latest --target "$GITHUB_SHA" --prerelease --title 'Happy VibeProxy rolling build' --notes "Fully tested commit: $GITHUB_SHA"
           fi
-          gh release upload vibeproxy-latest packages/happy-cli/*.tgz --clobber
+          gh release view vibeproxy-latest --json assets --jq '.assets[].name' | while IFS= read -r asset; do
+            case "$asset" in
+              *.tgz|*.sha256|commit.txt) gh release delete-asset vibeproxy-latest "$asset" --yes ;;
+            esac
+          done
+          gh release upload vibeproxy-latest release/*.tgz release/*.sha256 release/commit.txt
+
+      - name: Mark rolling release as current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/vibeproxy-latest" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/vibeproxy-latest" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref='refs/tags/vibeproxy-latest' -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          gh release edit vibeproxy-latest --notes "Fully tested commit: $GITHUB_SHA"
